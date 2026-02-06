@@ -332,116 +332,152 @@
         await Promise.all(activeWorkers);
     }
 
+
     async function startDownload() {
-        const mode = document.getElementById('exportMode').value;
-        const username = document.getElementById('username').value;
-        let start, end;
+    const mode = document.getElementById('exportMode').value;
+    const username = document.getElementById('username').value;
+    let start, end;
 
-        if (mode === 'pdf_all') {
-            start = 1;
-            end = GLOBAL_POSTS.length;
-        } else {
-            start = parseInt(document.getElementById('startRange').value);
-            end = parseInt(document.getElementById('endRange').value);
+    if (mode === 'pdf_all') {
+        start = 1;
+        end = GLOBAL_POSTS.length;
+    } else {
+        start = parseInt(document.getElementById('startRange').value);
+        end = parseInt(document.getElementById('endRange').value);
+    }
+
+    if(start < 1 || end > GLOBAL_POSTS.length || start > end) {
+        return alert(`Invalid range.`);
+    }
+
+    const buttons = document.querySelectorAll('button');
+    buttons.forEach(b => b.disabled = true);
+    
+    const postsToProcess = GLOBAL_POSTS.slice(start - 1, end);
+    log(`Starting Super-Fast Export: ${postsToProcess.length} posts...`, 'info');
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const zip = new JSZip();
+        let unifiedPDF = (mode === 'pdf_all') ? new jsPDF() : null;
+        if(unifiedPDF) {
+            unifiedPDF.setFontSize(18);
+            unifiedPDF.text(`Hive Archive: @${username}`, 10, 20);
         }
 
-        if(start < 1 || end > GLOBAL_POSTS.length || start > end) {
-            return alert(`Invalid range.`);
-        }
+        const zipFolder = (mode !== 'pdf_all') ? zip.folder(`${username}_export`) : null;
 
-        const buttons = document.querySelectorAll('button');
-        buttons.forEach(b => b.disabled = true);
+        // --- MÁGICA DO PARALELISMO ---
+        // Processamos lotes de posts simultaneamente em vez de um por um
+        let completed = 0;
         
-        const postsToProcess = GLOBAL_POSTS.slice(start - 1, end);
-        log(`Exporting ${postsToProcess.length} items...`, 'info');
+        // Função interna para processar UM post
+        const processPost = async (p, index) => {
+            const currentNum = start + index;
+            const title = p.title || 'Untitled';
+            const date = formatDate(p.created);
+            const slug = safeName(`${date.slice(0,10)}_${p.permlink}`);
+            let tags = '';
+            try { tags = JSON.parse(p.json_metadata).tags?.join(', ') || ''; } catch {}
 
-        try {
-            const { jsPDF } = window.jspdf;
-            const zip = new JSZip();
-            let unifiedPDF = null;
-            let zipFolder = null;
+            const textHeader = `Title: ${title}\nDate: ${date}\nLink: https://hive.blog/@${p.author}/${p.permlink}\nTags: ${tags}\n\n`;
 
-            if(mode === 'pdf_all') {
-                unifiedPDF = new jsPDF();
-                unifiedPDF.setFontSize(18);
-                unifiedPDF.text(`Hive Archive: @${username}`, 10, 20);
-                unifiedPDF.setFontSize(10);
-                unifiedPDF.text(`Created on: ${new Date().toLocaleDateString()}`, 10, 30);
+            if (mode === 'pdf_all') {
+                // PDF ainda precisa ser sequencial para manter a ordem das páginas
+                // Mas a extração de dados é instantânea aqui
+                unifiedPDF.addPage();
+                let y = 20;
+                unifiedPDF.setFontSize(14);
+                unifiedPDF.text(`#${currentNum}: ${title}`, 10, y); y+=10;
+                const lines = unifiedPDF.splitTextToSize(p.body, 190);
+                for(const line of lines) {
+                    if(y > 280) { unifiedPDF.addPage(); y = 20; }
+                    unifiedPDF.text(line, 10, y); y += 5;
+                }
             } else {
-                zipFolder = zip.folder(`${username}_export_${start}_to_${end}`);
-            }
+                const postDir = zipFolder.folder(`${currentNum}_${slug}`);
+                postDir.file('post.txt', textHeader + p.body);
 
-            for (let i = 0; i < postsToProcess.length; i++) {
-                const p = postsToProcess[i];
-                const currentNum = start + i;
-                setProgress((i / postsToProcess.length) * 100, `Processing ${currentNum}/${end}`);
-
-                const title = p.title || 'Untitled';
-                const date = formatDate(p.created);
-                const slug = safeName(`${date.slice(0,10)}_${p.permlink}`);
-                let tags = '';
-                try { tags = JSON.parse(p.json_metadata).tags?.join(', ') || ''; } catch {}
-
-                const textHeader = `Title: ${title}\nDate: ${date}\nLink: https://hive.blog/@${p.author}/${p.permlink}\nTags: ${tags}\n\n`;
-
-                if (mode === 'pdf_all') {
-                    unifiedPDF.addPage();
-                    let y = 20;
-                    unifiedPDF.setFontSize(14);
-                    unifiedPDF.text(`#${currentNum}: ${title}`, 10, y); y+=10;
-                    unifiedPDF.setFontSize(9);
-                    unifiedPDF.text(`${date} | Tags: ${tags}`, 10, y); y+=10;
-                    unifiedPDF.line(10, y-5, 200, y-5);
-                    
-                    //const cleanBody = p.body.replace(/!\[.*?\]\(.*?\)/g, '[IMAGE]').replace(/<img.*?>/g, '[IMAGE]');
-                    const cleanBody = p.body;
-                    const lines = unifiedPDF.splitTextToSize(cleanBody, 190);
-                    for(const line of lines) {
-                        if(y > 280) { unifiedPDF.addPage(); y = 20; }
-                        unifiedPDF.text(line, 10, y);
-                        y += 5;
-                    }
-                } 
-                else {
-                    const postDir = zipFolder.folder(`${currentNum}_${slug}`);
-                    postDir.file('post.txt', textHeader + p.body);
-
-                    if (mode === 'zip_full') {
-                        const imgDir = postDir.folder('images');
-                        const imgUrls = extractImageUrls(p.body);
-                        if(imgUrls.length > 0) {
-                            const tasks = imgUrls.map((url, idx) => ({ url, idx }));
-                            await downloadPool(tasks, 8, async ({url, idx}) => {
-                                try {
-                                    const proxiedUrl = url.startsWith('http') ? 'https://images.hive.blog/0x0/'+url : url;
-                                    const res = await fetch(proxiedUrl);
-                                    if(!res.ok) throw new Error();
-                                    const blob = await res.blob();
-                                    let ext = blob.type.split('/')[1] || 'jpg';
-                                    imgDir.file(`img_${idx+1}.${ext}`, blob);
-                                } catch(e) {}
-                            });
-                        }
-                    }
+if (mode === 'zip_full') {
+    const imgUrls = extractImageUrls(p.body);
+    if(imgUrls.length > 0) {
+        const imgDir = postDir.folder('images');
+        
+        await downloadPool(imgUrls.map((url, idx) => ({url, idx})), 8, async ({url, idx}) => {
+            let finalUrl = url;
+            
+            // Limpa URLs com proxy duplicado antes de começar
+            if (finalUrl.includes('images.hive.blog/')) {
+                const parts = finalUrl.split('https://');
+                if (parts.length > 2) {
+                    finalUrl = 'https://' + parts[parts.length - 1];
                 }
             }
 
-            setProgress(98, 'Finalizing...');
-            if (mode === 'pdf_all') {
-                unifiedPDF.save(`${username}_complete_archive.pdf`);
-            } else {
-                const content = await zip.generateAsync({type:"blob"});
-                saveAs(content, `${username}_posts_${start}_to_${end}.zip`);
-            }
-            log('Export successful!', 'ok');
+            // Lista de tentativas: https://www.ibm.com/docs/pt-br/was-liberty/nd?topic=configuration-httpproxyredirect
+            const attempts = [
+                `https://images.hive.blog/0x0/${finalUrl}`,
+                `https://images.hive.blog/0x0/${finalUrl}`,
+                finalUrl
+            ];
 
-        } catch (err) {
-            log('Error: ' + err.message, 'err');
-        } finally {
-            buttons.forEach(b => b.disabled = false);
-            setProgress(100, 'Done.');
-        }
+            let success = false;
+            for (let i = 0; i < attempts.length; i++) {
+                try {
+                    const res = await fetch(attempts[i]);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    
+                    const blob = await res.blob();
+                    if (blob.size < 500) throw new Error("File too small");
+
+                    let ext = blob.type.split('/')[1] || 'jpg';
+                    if (ext.includes('plain')) ext = 'jpg';
+                    
+                    imgDir.file(`img_${idx+1}.${ext}`, blob);
+                    success = true;
+                    break; // Sai do loop de tentativas se conseguir baixar
+                } catch(e) {
+                    const method = i === 0 ? "Proxy HD" : i === 1 ? "Proxy Raw" : "Direct Link";
+                    console.warn(`Attempt ${i+1} (${method}) failed for: ${finalUrl}`);
+                }
+            }
+
+            if (!success) {
+                log(`Failed to download image ${idx+1} from Post #${currentNum} (All methods failed)`, 'warn');
+            }
+        });
     }
+}
+            }
+            completed++;
+            const pct = (completed / postsToProcess.length) * 100;
+            setProgress(pct, `Fast Processing: ${completed} / ${postsToProcess.length}`);
+        };
+
+        // Executa o processamento de posts com concorrência de 5 posts por vez
+        // (Cada post baixa 8 imagens, então teremos ~40 downloads ativos)
+        await downloadPool(postsToProcess.map((p, i) => ({p, i})), 5, async ({p, i}) => {
+            await processPost(p, i);
+        });
+
+        setProgress(98, 'Wrapping up your files...');
+        
+        if (mode === 'pdf_all') {
+            unifiedPDF.save(`${username}_archive.pdf`);
+        } else {
+            const content = await zip.generateAsync({type:"blob"});
+            saveAs(content, `${username}_export.zip`);
+        }
+        
+        log('Mission accomplished! All files saved.', 'ok');
+
+    } catch (err) {
+        log('Error: ' + err.message, 'err');
+    } finally {
+        buttons.forEach(b => b.disabled = false);
+        setProgress(100, 'Finished.');
+    }
+}
 
     function extractImageUrls(body) {
         const urls = new Set();
