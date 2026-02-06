@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hive Exporter Pro (Multi-Node)</title>
+  <style>
+    :root{--bg:#0f172a;--card:#1e293b;--primary:#38bdf8;--text:#e2e8f0;--muted:#94a3b8;--border:#334155;}
+    body{font-family:system-ui,-apple-system,sans-serif;background:#020617;color:var(--text);display:flex;justify-content:center;padding:20px;margin:0}
+    .card{background:var(--card);width:100%;max-width:800px;padding:30px;border-radius:16px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);border:1px solid var(--border)}
+    h1{margin-top:0;color:var(--primary);font-size:1.8rem}
+    p{color:var(--muted);font-size:0.95rem;line-height:1.5}
+    
+    .step-box{background:#0f172a;border:1px solid var(--border);padding:20px;border-radius:10px;margin-bottom:20px}
+    .step-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}
+    .step-title{font-weight:bold;color:#fff;font-size:1.1rem}
+    .total-badge{background:var(--primary);color:#0f172a;padding:4px 12px;border-radius:20px;font-size:0.85rem;font-weight:bold;display:none}
+    
+    .input-group{display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap}
+    input, select{padding:12px;background:#1e293b;border:1px solid var(--border);color:#fff;border-radius:8px;outline:none;flex:1}
+    input:focus, select:focus{border-color:var(--primary)}
+    
+    button{padding:12px 24px;font-weight:600;border-radius:8px;border:none;cursor:pointer;transition:all .2s}
+    .btn-primary{background:var(--primary);color:#0f172a}
+    .btn-primary:hover{background:#0ea5e9}
+    .btn-success{background:#22c55e;color:#fff}
+    .btn-success:hover{background:#16a34a}
+    button:disabled{opacity:0.5;cursor:not-allowed;filter:grayscale(1)}
+
+    .range-inputs{display:flex;align-items:center;gap:10px;flex:1;background:#1e293b;padding:8px;border-radius:8px;border:1px solid var(--border)}
+    .range-inputs span{color:var(--muted);font-size:0.9rem;white-space:nowrap}
+    .range-inputs input{background:transparent;border:none;text-align:center;font-weight:bold;color:var(--primary)}
+
+    .hidden{display:none}
+    
+    .progress-area{margin-top:20px}
+    .bar-bg{height:8px;background:#334155;border-radius:4px;overflow:hidden}
+    .bar-fill{height:100%;width:0%;background:var(--primary);transition:width 0.3s}
+    .status-text{display:flex;justify-content:space-between;font-size:0.85rem;margin-top:8px;color:var(--muted)}
+    
+    .log-box{background:#020617;border:1px solid var(--border);border-radius:8px;height:200px;overflow-y:auto;padding:15px;font-family:monospace;font-size:12px;margin-top:20px}
+    .log-item{margin-bottom:4px;color:var(--muted)}
+    .log-item.ok{color:#4ade80}
+    .log-item.err{color:#f87171}
+    .log-item.warn{color:#fbbf24}
+    .log-item.info{color:#60a5fa}
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>Hive Export Tool</h1>
+    <p>Multi-node backup tool. If one API fails, it automatically switches to a fallback server.</p>
+
+    <div class="step-box">
+      <div class="step-header">
+        <span class="step-title">1. Find Posts</span>
+      </div>
+      <div class="input-group">
+        <input id="username" placeholder="Hive Username (without @)" />
+        <button class="btn-primary" id="btnSearch" onclick="fetchAllPosts()">Find Posts</button>
+      </div>
+    </div>
+
+    <div id="step2" class="step-box hidden">
+      <div class="step-header">
+        <span class="step-title">2. Download Options</span>
+        <span id="totalBadge" class="total-badge">Total Available: 0</span>
+      </div>
+      
+      <div class="input-group">
+        <select id="exportMode" onchange="toggleRangeInputs()">
+          <option value="zip_full">📦 ZIP Full (Text .txt + Images folder)</option>
+          <option value="zip_text">📄 ZIP Lite (Text .txt only)</option>
+          <option value="pdf_all">📚 Unified PDF (ALL POSTS - Ignore Range)</option>
+        </select>
+      </div>
+
+      <div class="input-group" id="rangeContainer">
+        <div class="range-inputs">
+          <span>From Post #</span>
+          <input type="number" id="startRange" value="1" min="1">
+          <span>To Post #</span>
+          <input type="number" id="endRange" value="100">
+        </div>
+        <button class="btn-success" id="btnDownload" onclick="startDownload()">Download Selection</button>
+      </div>
+      
+      <div class="input-group hidden" id="pdfBtnContainer">
+        <button class="btn-success" style="width:100%" onclick="startDownload()">Download ALL Posts (PDF)</button>
+      </div>
+    </div>
+
+    <div class="progress-area">
+      <div class="bar-bg"><div id="progressBar" class="bar-fill"></div></div>
+      <div class="status-text">
+        <span id="statusMsg">Waiting...</span>
+        <span id="percentMsg">0%</span>
+      </div>
+    </div>
+
+    <div class="log-box" id="logConsole"></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+  <script>
+    let GLOBAL_POSTS = [];
+    
+    // Nodes List
+    const HIVE_NODES = [
+        'https://api.hive.blog',
+        'https://api.deathwing.me',
+        'https://api.openhive.network'
+    ];
+    let currentNodeIndex = 0;
+
+    const log = (msg, type='def') => {
+        const d = document.createElement('div');
+        d.className = `log-item ${type}`;
+        d.textContent = `> ${msg}`;
+        const box = document.getElementById('logConsole');
+        box.appendChild(d);
+        box.scrollTop = box.scrollHeight;
+    };
+    
+    const setProgress = (percent, text) => {
+        document.getElementById('progressBar').style.width = percent + '%';
+        if(text) document.getElementById('statusMsg').textContent = text;
+        document.getElementById('percentMsg').textContent = Math.floor(percent) + '%';
+    };
+
+    const formatDate = d => new Date(d+'Z').toLocaleDateString('en-US');
+    const safeName = s => s.replace(/[^a-z0-9-_]+/gi,'_').toLowerCase();
+    
+    function toggleRangeInputs() {
+        const mode = document.getElementById('exportMode').value;
+        const rangeCont = document.getElementById('rangeContainer');
+        const pdfBtn = document.getElementById('pdfBtnContainer');
+        if (mode === 'pdf_all') {
+            rangeCont.classList.add('hidden');
+            pdfBtn.classList.remove('hidden');
+        } else {
+            rangeCont.classList.remove('hidden');
+            pdfBtn.classList.add('hidden');
+        }
+    }
+
+    // --- ENHANCED API CALL WITH FALLBACK ---
+    async function hiveCall(method, params) {
+        let lastError = null;
+        
+        // Try each node in the list
+        for (let i = 0; i < HIVE_NODES.length; i++) {
+            const node = HIVE_NODES[currentNodeIndex];
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
+
+                const res = await fetch(node, {
+                    method: 'POST',
+                    body: JSON.stringify({jsonrpc: '2.0', method, params, id: 1}),
+                    headers: {'Content-Type': 'application/json'},
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (data.error) throw new Error(data.error.message);
+                
+                return data; // Success!
+
+            } catch (e) {
+                lastError = e;
+                log(`Node ${node} failed: ${e.message}`, 'warn');
+                // Switch to next node
+                currentNodeIndex = (currentNodeIndex + 1) % HIVE_NODES.length;
+                log(`Switching to: ${HIVE_NODES[currentNodeIndex]}`, 'info');
+            }
+        }
+        throw new Error(`All Hive nodes failed. Last error: ${lastError.message}`);
+    }
+
+    async function fetchAllPosts() {
+        const username = document.getElementById('username').value.trim();
+        if(!username) return alert('Please enter a username');
+        
+        const btn = document.getElementById('btnSearch');
+        btn.disabled = true;
+        document.getElementById('step2').classList.add('hidden');
+        document.getElementById('logConsole').innerHTML = '';
+        GLOBAL_POSTS = [];
+        
+        log(`Scanning profile @${username}...`, 'info');
+        setProgress(0, 'Connecting to Hive...');
+
+        let start_author = null;
+        let start_permlink = null;
+        const seen = new Set();
+
+        try {
+            while(true) {
+                const query = { tag: username, limit: 20 };
+                if(start_author) {
+                    query.start_author = start_author;
+                    query.start_permlink = start_permlink;
+                }
+
+                const r = await hiveCall('condenser_api.get_discussions_by_blog', [query]);
+                const arr = r.result || [];
+                if(arr.length === 0) break;
+
+                for(const p of arr) {
+                    if(p.author === username && !seen.has(p.permlink)) {
+                        seen.add(p.permlink);
+                        GLOBAL_POSTS.push(p);
+                    }
+                }
+
+                log(`Fetched ${GLOBAL_POSTS.length} posts...`);
+                
+                const last = arr[arr.length-1];
+                if (last.author === start_author && last.permlink === start_permlink && arr.length === 1) break;
+                
+                start_author = last.author;
+                start_permlink = last.permlink;
+
+                if(arr.length < 20) break;
+                await new Promise(r => setTimeout(r, 50)); 
+            }
+
+            GLOBAL_POSTS.reverse(); 
+
+            if(GLOBAL_POSTS.length === 0) {
+                alert('No posts found!');
+                btn.disabled = false;
+                return;
+            }
+
+            log(`Scan complete. ${GLOBAL_POSTS.length} posts found.`, 'ok');
+            const badge = document.getElementById('totalBadge');
+            badge.style.display = 'block';
+            badge.textContent = `Total Available: ${GLOBAL_POSTS.length}`;
+            document.getElementById('endRange').value = Math.min(100, GLOBAL_POSTS.length);
+            document.getElementById('endRange').max = GLOBAL_POSTS.length;
+            document.getElementById('step2').classList.remove('hidden');
+            btn.disabled = false;
+            setProgress(100, 'Ready.');
+
+        } catch(e) {
+            log('Fatal Error: ' + e.message, 'err');
+            btn.disabled = false;
+        }
+    }
+
+    async function downloadPool(items, concurrency, workerFn) {
+        const queue = [...items];
+        const activeWorkers = [];
+        const next = async () => {
+            while (queue.length > 0) {
+                await workerFn(queue.shift());
+            }
+        };
+        for (let i = 0; i < concurrency; i++) activeWorkers.push(next());
+        await Promise.all(activeWorkers);
+    }
+
+    async function startDownload() {
+        const mode = document.getElementById('exportMode').value;
+        const username = document.getElementById('username').value;
+        let start, end;
+
+        if (mode === 'pdf_all') {
+            start = 1;
+            end = GLOBAL_POSTS.length;
+        } else {
+            start = parseInt(document.getElementById('startRange').value);
+            end = parseInt(document.getElementById('endRange').value);
+        }
+
+        if(start < 1 || end > GLOBAL_POSTS.length || start > end) {
+            return alert(`Invalid range.`);
+        }
+
+        const buttons = document.querySelectorAll('button');
+        buttons.forEach(b => b.disabled = true);
+        
+        const postsToProcess = GLOBAL_POSTS.slice(start - 1, end);
+        log(`Exporting ${postsToProcess.length} items...`, 'info');
+
+        try {
+            const { jsPDF } = window.jspdf;
+            const zip = new JSZip();
+            let unifiedPDF = null;
+            let zipFolder = null;
+
+            if(mode === 'pdf_all') {
+                unifiedPDF = new jsPDF();
+                unifiedPDF.setFontSize(18);
+                unifiedPDF.text(`Hive Archive: @${username}`, 10, 20);
+                unifiedPDF.setFontSize(10);
+                unifiedPDF.text(`Created on: ${new Date().toLocaleDateString()}`, 10, 30);
+            } else {
+                zipFolder = zip.folder(`${username}_export_${start}_to_${end}`);
+            }
+
+            for (let i = 0; i < postsToProcess.length; i++) {
+                const p = postsToProcess[i];
+                const currentNum = start + i;
+                setProgress((i / postsToProcess.length) * 100, `Processing ${currentNum}/${end}`);
+
+                const title = p.title || 'Untitled';
+                const date = formatDate(p.created);
+                const slug = safeName(`${date.slice(0,10)}_${p.permlink}`);
+                let tags = '';
+                try { tags = JSON.parse(p.json_metadata).tags?.join(', ') || ''; } catch {}
+
+                const textHeader = `Title: ${title}\nDate: ${date}\nLink: https://hive.blog/@${p.author}/${p.permlink}\nTags: ${tags}\n\n`;
+
+                if (mode === 'pdf_all') {
+                    unifiedPDF.addPage();
+                    let y = 20;
+                    unifiedPDF.setFontSize(14);
+                    unifiedPDF.text(`#${currentNum}: ${title}`, 10, y); y+=10;
+                    unifiedPDF.setFontSize(9);
+                    unifiedPDF.text(`${date} | Tags: ${tags}`, 10, y); y+=10;
+                    unifiedPDF.line(10, y-5, 200, y-5);
+                    
+                    //const cleanBody = p.body.replace(/!\[.*?\]\(.*?\)/g, '[IMAGE]').replace(/<img.*?>/g, '[IMAGE]');
+                    const cleanBody = p.body;
+                    const lines = unifiedPDF.splitTextToSize(cleanBody, 190);
+                    for(const line of lines) {
+                        if(y > 280) { unifiedPDF.addPage(); y = 20; }
+                        unifiedPDF.text(line, 10, y);
+                        y += 5;
+                    }
+                } 
+                else {
+                    const postDir = zipFolder.folder(`${currentNum}_${slug}`);
+                    postDir.file('post.txt', textHeader + p.body);
+
+                    if (mode === 'zip_full') {
+                        const imgDir = postDir.folder('images');
+                        const imgUrls = extractImageUrls(p.body);
+                        if(imgUrls.length > 0) {
+                            const tasks = imgUrls.map((url, idx) => ({ url, idx }));
+                            await downloadPool(tasks, 8, async ({url, idx}) => {
+                                try {
+                                    const proxiedUrl = url.startsWith('http') ? 'https://images.hive.blog/0x0/'+url : url;
+                                    const res = await fetch(proxiedUrl);
+                                    if(!res.ok) throw new Error();
+                                    const blob = await res.blob();
+                                    let ext = blob.type.split('/')[1] || 'jpg';
+                                    imgDir.file(`img_${idx+1}.${ext}`, blob);
+                                } catch(e) {}
+                            });
+                        }
+                    }
+                }
+            }
+
+            setProgress(98, 'Finalizing...');
+            if (mode === 'pdf_all') {
+                unifiedPDF.save(`${username}_complete_archive.pdf`);
+            } else {
+                const content = await zip.generateAsync({type:"blob"});
+                saveAs(content, `${username}_posts_${start}_to_${end}.zip`);
+            }
+            log('Export successful!', 'ok');
+
+        } catch (err) {
+            log('Error: ' + err.message, 'err');
+        } finally {
+            buttons.forEach(b => b.disabled = false);
+            setProgress(100, 'Done.');
+        }
+    }
+
+    function extractImageUrls(body){
+      const urls=new Set();
+      const md=/!\[[^\]]*\]\(([^)]+)\)/g; let m;
+      while((m=md.exec(body))) urls.add(m[1]);
+      const html=/<img[^>]+src=["']([^"']+)["']/gi;
+      while((m=html.exec(body))) urls.add(m[1]);
+      return [...urls];
+    }
+  </script>
+</body>
+</html>
