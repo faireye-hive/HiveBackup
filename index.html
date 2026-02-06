@@ -443,13 +443,26 @@
         }
     }
 
-    function extractImageUrls(body){
-      const urls=new Set();
-      const md=/!\[[^\]]*\]\(([^)]+)\)/g; let m;
-      while((m=md.exec(body))) urls.add(m[1]);
-      const html=/<img[^>]+src=["']([^"']+)["']/gi;
-      while((m=html.exec(body))) urls.add(m[1]);
-      return [...urls];
+    function extractImageUrls(body) {
+        const urls = new Set();
+        
+        // 1. Markdown: ![alt](url)
+        const md = /!\[[^\]]*\]\(([^)]+)\)/g;
+        let m;
+        while ((m = md.exec(body))) urls.add(m[1].split('?')[0].split(' ')[0]);
+
+        // 2. HTML: <img src="url">
+        const html = /<img[^>]+src=["']([^"']+)["']/gi;
+        while ((m = html.exec(body))) urls.add(m[1]);
+
+        // 3. Links soltos (URLs puras que terminam em extensões de imagem)
+        // Procura por links que começam com http/https e terminam em jpg, jpeg, png, gif, webp ou svg
+        const rawLinks = /(https?:\/\/[^\s<>"']+?\.(?:jpg|jpeg|png|gif|webp|svg|JPG|JPEG|PNG|GIF|WEBP|SVG))(?:\?[^\s<>"']*)?/g;
+        while ((m = rawLinks.exec(body))) {
+            urls.add(m[1]);
+        }
+
+        return [...urls];
     }
   </script>
 </body>
