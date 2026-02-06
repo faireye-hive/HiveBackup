@@ -2,98 +2,162 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hive Exporter Pro (Multi-Node)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hive Exporter Pro</title>
   <style>
     :root{--bg:#0f172a;--card:#1e293b;--primary:#38bdf8;--text:#e2e8f0;--muted:#94a3b8;--border:#334155;}
-    body{font-family:system-ui,-apple-system,sans-serif;background:#020617;color:var(--text);display:flex;justify-content:center;padding:20px;margin:0}
-    .card{background:var(--card);width:100%;max-width:800px;padding:30px;border-radius:16px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);border:1px solid var(--border)}
-    h1{margin-top:0;color:var(--primary);font-size:1.8rem}
-    p{color:var(--muted);font-size:0.95rem;line-height:1.5}
     
-    .step-box{background:#0f172a;border:1px solid var(--border);padding:20px;border-radius:10px;margin-bottom:20px}
-    .step-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}
-    .step-title{font-weight:bold;color:#fff;font-size:1.1rem}
-    .total-badge{background:var(--primary);color:#0f172a;padding:4px 12px;border-radius:20px;font-size:0.85rem;font-weight:bold;display:none}
+    body{
+      font-family:system-ui,-apple-system,sans-serif;
+      background:#020617;
+      color:var(--text);
+      display:flex;
+      justify-content:center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 10px;
+      margin:0;
+    }
+
+    .card{
+      background:var(--card);
+      width:100%;
+      max-width:700px;
+      padding:20px;
+      border-radius:16px;
+      box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);
+      border:1px solid var(--border);
+      box-sizing: border-box;
+    }
+
+    h1{margin-top:0;color:var(--primary);font-size:1.5rem;text-align: center;}
+    p{color:var(--muted);font-size:0.9rem;line-height:1.4;text-align: center;margin-bottom: 20px;}
     
-    .input-group{display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap}
-    input, select{padding:12px;background:#1e293b;border:1px solid var(--border);color:#fff;border-radius:8px;outline:none;flex:1}
+    .step-box{background:#0f172a;border:1px solid var(--border);padding:15px;border-radius:10px;margin-bottom:15px}
+    .step-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap: wrap;gap: 8px;}
+    .step-title{font-weight:bold;color:#fff;font-size:1rem}
+    .total-badge{background:var(--primary);color:#0f172a;padding:3px 10px;border-radius:20px;font-size:0.75rem;font-weight:bold;display:none}
+    
+    /* Input Groups - Mobile First */
+    .input-group{display:flex;flex-direction: column;gap:10px;margin-bottom:12px;}
+    
+    @media (min-width: 600px) {
+      .input-group { flex-direction: row; }
+    }
+
+    input, select{
+      padding:12px;
+      background:#1e293b;
+      border:1px solid var(--border);
+      color:#fff;
+      border-radius:8px;
+      outline:none;
+      font-size: 16px; /* Evita zoom automático no iOS */
+    }
+
     input:focus, select:focus{border-color:var(--primary)}
     
-    button{padding:12px 24px;font-weight:600;border-radius:8px;border:none;cursor:pointer;transition:all .2s}
-    .btn-primary{background:var(--primary);color:#0f172a}
-    .btn-primary:hover{background:#0ea5e9}
-    .btn-success{background:#22c55e;color:#fff}
-    .btn-success:hover{background:#16a34a}
-    button:disabled{opacity:0.5;cursor:not-allowed;filter:grayscale(1)}
+    button{
+      padding:12px 20px;
+      font-weight:600;
+      border-radius:8px;
+      border:none;
+      cursor:pointer;
+      transition:all .2s;
+      font-size: 14px;
+      white-space: nowrap;
+    }
 
-    .range-inputs{display:flex;align-items:center;gap:10px;flex:1;background:#1e293b;padding:8px;border-radius:8px;border:1px solid var(--border)}
-    .range-inputs span{color:var(--muted);font-size:0.9rem;white-space:nowrap}
-    .range-inputs input{background:transparent;border:none;text-align:center;font-weight:bold;color:var(--primary)}
+    .btn-primary{background:var(--primary);color:#0f172a}
+    .btn-success{background:#22c55e;color:#fff}
+    button:disabled{opacity:0.5;filter:grayscale(1)}
+
+    .range-inputs{
+      display:flex;
+      align-items:center;
+      justify-content: center;
+      gap:8px;
+      background:#1e293b;
+      padding:10px;
+      border-radius:8px;
+      border:1px solid var(--border);
+    }
+
+    .range-inputs input{ width: 60px; padding: 5px; text-align: center; background: transparent; border: none; color: var(--primary); font-weight: bold;}
+    .range-inputs span{ color: var(--muted); font-size: 0.8rem; }
 
     .hidden{display:none}
     
-    .progress-area{margin-top:20px}
-    .bar-bg{height:8px;background:#334155;border-radius:4px;overflow:hidden}
+    /* Progress */
+    .progress-area{margin-top:15px}
+    .bar-bg{height:6px;background:#334155;border-radius:3px;overflow:hidden}
     .bar-fill{height:100%;width:0%;background:var(--primary);transition:width 0.3s}
-    .status-text{display:flex;justify-content:space-between;font-size:0.85rem;margin-top:8px;color:var(--muted)}
+    .status-text{display:flex;justify-content:space-between;font-size:0.75rem;margin-top:6px;color:var(--muted)}
     
-    .log-box{background:#020617;border:1px solid var(--border);border-radius:8px;height:200px;overflow-y:auto;padding:15px;font-family:monospace;font-size:12px;margin-top:20px}
-    .log-item{margin-bottom:4px;color:var(--muted)}
+    /* Log */
+    .log-box{
+      background:#020617;
+      border:1px solid var(--border);
+      border-radius:8px;
+      height:150px;
+      overflow-y:auto;
+      padding:12px;
+      font-family:monospace;
+      font-size:11px;
+      margin-top:15px;
+      word-break: break-all;
+    }
+
+    .log-item{margin-bottom:3px; color:var(--muted)}
     .log-item.ok{color:#4ade80}
-    .log-item.err{color:#f87171}
     .log-item.warn{color:#fbbf24}
-    .log-item.info{color:#60a5fa}
   </style>
 </head>
 <body>
 
   <div class="card">
-    <h1>Hive Export Tool</h1>
-    <p>Multi-node backup tool. If one API fails, it automatically switches to a fallback server.</p>
+    <h1>Hive Exporter Pro</h1>
+    <p>Backup tool with multi-node fallback.</p>
 
     <div class="step-box">
-      <div class="step-header">
-        <span class="step-title">1. Find Posts</span>
-      </div>
+      <div class="step-header"><span class="step-title">1. Search</span></div>
       <div class="input-group">
-        <input id="username" placeholder="Hive Username (without @)" />
+        <input id="username" placeholder="Username" />
         <button class="btn-primary" id="btnSearch" onclick="fetchAllPosts()">Find Posts</button>
       </div>
     </div>
 
     <div id="step2" class="step-box hidden">
       <div class="step-header">
-        <span class="step-title">2. Download Options</span>
-        <span id="totalBadge" class="total-badge">Total Available: 0</span>
+        <span class="step-title">2. Download</span>
+        <span id="totalBadge" class="total-badge">0 Posts</span>
       </div>
       
       <div class="input-group">
         <select id="exportMode" onchange="toggleRangeInputs()">
-          <option value="zip_full">📦 ZIP Full (Text .txt + Images folder)</option>
-          <option value="zip_text">📄 ZIP Lite (Text .txt only)</option>
-          <option value="pdf_all">📚 Unified PDF (ALL POSTS - Ignore Range)</option>
+          <option value="zip_full">📦 ZIP (Text + Images)</option>
+          <option value="zip_text">📄 ZIP (Text Only)</option>
+          <option value="pdf_all">📚 Full PDF (All Posts)</option>
         </select>
       </div>
 
       <div class="input-group" id="rangeContainer">
         <div class="range-inputs">
-          <span>From Post #</span>
-          <input type="number" id="startRange" value="1" min="1">
-          <span>To Post #</span>
-          <input type="number" id="endRange" value="100">
+          <span>From</span><input type="number" id="startRange" value="1">
+          <span>To</span><input type="number" id="endRange" value="100">
         </div>
-        <button class="btn-success" id="btnDownload" onclick="startDownload()">Download Selection</button>
+        <button class="btn-success" id="btnDownload" onclick="startDownload()">Go</button>
       </div>
       
       <div class="input-group hidden" id="pdfBtnContainer">
-        <button class="btn-success" style="width:100%" onclick="startDownload()">Download ALL Posts (PDF)</button>
+        <button class="btn-success" onclick="startDownload()">Download Complete PDF</button>
       </div>
     </div>
 
     <div class="progress-area">
       <div class="bar-bg"><div id="progressBar" class="bar-fill"></div></div>
       <div class="status-text">
-        <span id="statusMsg">Waiting...</span>
+        <span id="statusMsg">Idle</span>
         <span id="percentMsg">0%</span>
       </div>
     </div>
